@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, GenerationJob, MediaAsset, TelegramUser
+from .models import AuditLog, GenerationJob, MediaAsset, TelegramUser, ToolDefinition, ToolExecutionRequest
 
 
 @admin.register(TelegramUser)
@@ -37,3 +37,17 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_display = ("id", "event_type", "message", "telegram_user", "generation_job", "created_at")
     search_fields = ("event_type", "message")
     list_filter = ("event_type",)
+
+
+@admin.register(ToolDefinition)
+class ToolDefinitionAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_enabled", "requires_confirmation", "is_destructive", "is_external", "updated_at")
+    search_fields = ("name", "description")
+    list_filter = ("is_enabled", "requires_confirmation", "is_destructive", "is_external")
+
+
+@admin.register(ToolExecutionRequest)
+class ToolExecutionRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "tool", "telegram_user", "status", "requires_confirmation", "created_at", "updated_at")
+    search_fields = ("tool__name", "decision_message")
+    list_filter = ("status", "requires_confirmation", "tool__name")

@@ -23,7 +23,12 @@ class WorkflowManager:
     def render_workflow(self, name: str, placeholders: dict[str, Any]) -> dict[str, Any]:
         workflow = self.load_workflow(name)
         string_placeholders = {key: str(value) for key, value in placeholders.items()}
-        return self._replace_placeholders(workflow, string_placeholders)
+        rendered = self._replace_placeholders(workflow, string_placeholders)
+        missing_placeholders = self._find_unresolved_placeholders(rendered, list(placeholders.keys()))
+        if missing_placeholders:
+            missing_list = ", ".join(sorted(missing_placeholders))
+            raise ValueError(f"Workflow still contains unresolved placeholders: {missing_list}")
+        return rendered
 
     def _resolve_workflow_path(self, name: str) -> Path:
         candidate_name = name if name.endswith(".json") else f"{name}.json"
@@ -50,3 +55,19 @@ class WorkflowManager:
                 return int(replaced)
             return replaced
         return copy.deepcopy(value)
+
+    def _find_unresolved_placeholders(self, value: Any, placeholder_keys: list[str]) -> set[str]:
+        unresolved: set[str] = set()
+        if isinstance(value, dict):
+            for item in value.values():
+                unresolved.update(self._find_unresolved_placeholders(item, placeholder_keys))
+            return unresolved
+        if isinstance(value, list):
+            for item in value:
+                unresolved.update(self._find_unresolved_placeholders(item, placeholder_keys))
+            return unresolved
+        if isinstance(value, str):
+            for placeholder in placeholder_keys:
+                if placeholder in value:
+                    unresolved.add(placeholder)
+        return unresolved

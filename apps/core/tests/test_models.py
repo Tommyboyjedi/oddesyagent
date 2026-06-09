@@ -32,6 +32,11 @@ class GenerationJobModelTests(TestCase):
         self.assertEqual(job.state, GenerationJob.STATE_RUNNING)
         self.assertIsNotNone(job.started_at)
 
+        job.mark_cancellation_requested()
+        job.refresh_from_db()
+        self.assertEqual(job.state, GenerationJob.STATE_CANCELLATION_REQUESTED)
+        self.assertIn("cancellation_requested_at", job.metadata)
+
         output_media = MediaAsset.objects.create(
             telegram_user=self.telegram_user,
             asset_type=MediaAsset.TYPE_GENERATED_VIDEO,

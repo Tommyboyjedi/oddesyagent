@@ -72,6 +72,14 @@ Edit `.env` and set:
 - `TELEGRAM_ALLOWED_USER_IDS`
 - `COMFYUI_BASE_URL`
 - `ODDESY_MEDIA_ROOT`
+- `ODDESY_INTERNAL_API_ENABLED`
+- `ODDESY_INTERNAL_API_TOKEN`
+- `LITELLM_ENABLED`
+- `LITELLM_MODEL`
+- `LITELLM_API_KEY`
+- `ODDESY_SAFE_ROOTS`
+- `VAST_API_KEY`
+- `YOUTUBE_UPLOAD_ENABLED`
 
 Run migrations:
 
@@ -107,14 +115,88 @@ python manage.py run_worker --once
 python manage.py run_worker --sleep-seconds 3 --poll-seconds 5 --timeout-seconds 1800
 ```
 
+Phase 2 control commands:
+
+- `/queue` shows the queued and running jobs for the allowed user.
+- `/history` shows recent completed, failed, and cancelled jobs with workflow, seed, and prompt details.
+- `/rerun` queues a copy of the latest completed job.
+- `/rerun 123` queues a copy of completed job `123` if it belongs to the allowed user.
+- `/cancel` cancels queued jobs immediately and marks running jobs as `cancellation_requested` when interruption is not available.
+- Completed jobs retain output metadata including file size, output asset type, ComfyUI filename/subfolder/type, and duration when ComfyUI exposes it.
+- Failed jobs retain structured failure metadata such as `workflow_missing`, `placeholder_missing`, `output_missing`, `timeout`, or `comfyui_unavailable`.
+- Queued local GPU jobs now carry explicit scheduler fields: `priority` and `requested_executor`. The current worker still runs only one `local_gpu` job at a time, but it now claims higher-priority work first.
+
+Operator job inspection:
+
+```powershell
+python manage.py inspect_jobs
+python manage.py inspect_jobs --job-id 12
+python manage.py inspect_jobs --cancel 12
+python manage.py inspect_jobs --retry 12
+```
+
+Local internal API boundary:
+
+- Disabled by default with `ODDESY_INTERNAL_API_ENABLED=false`.
+- Requires loopback access and `Authorization: Bearer <ODDESY_INTERNAL_API_TOKEN>`.
+- Exposes only:
+  - `GET /api/internal/workflows/`
+  - `POST /api/internal/jobs/`
+  - `GET /api/internal/jobs/<job_id>/`
+  - `GET /api/internal/jobs/<job_id>/output/`
+  - `GET /api/internal/media/`
+
+Phase 3 natural-language parsing:
+
+- Disabled by default with `LITELLM_ENABLED=false`.
+- When enabled, plain text requests can be parsed into structured video job instructions.
+- LiteLLM is limited to existing workflow names from `workflows/` and cannot request file paths, URLs, shell commands, or arbitrary tools.
+- When disabled, the text fallback supports `make video`, `status`, `queue`, and `rerun [job_id]`.
+
+Phase 5 tool registry foundation:
+
+- Tool execution remains disabled by default; this phase adds policy checks, not open-ended execution.
+- Tool definitions declare allowed inputs, forbidden inputs, audit requirements, confirmation requirements, and optional safe roots.
+- Any future NAS/file tools must stay inside `ODDESY_SAFE_ROOTS`.
+- Vast.ai support requires `VAST_API_KEY`.
+- YouTube support requires `YOUTUBE_UPLOAD_ENABLED=true` plus later OAuth-specific work before any uploads are added.
+- Destructive or external tool requests now create tracked `ToolExecutionRequest` records and must be explicitly confirmed before later execution work is added.
+- `JobSchedulerService` makes queue selection explicit and testable while preserving the current single-local-GPU behavior.
+
+Tool registry operator commands:
+
+```powershell
+python manage.py manage_tool_registry
+python manage.py manage_tool_registry --submit media_cleanup_preview --inputs '{"target_path":"C:\\safe-root\\job-1","dry_run":true}'
+python manage.py manage_tool_registry --submit safe_root_browser --inputs '{"target_path":"C:\\safe-root","limit":25}'
+python manage.py manage_tool_registry --submit media_cleanup_preview --inputs '{"target_path":"C:\\safe-root","limit":25,"older_than_days":7,"extensions":[".mp4",".png"]}'
+python manage.py manage_tool_registry --submit media_cleanup --inputs '{"target_path":"C:\\safe-root","limit":25,"older_than_days":30,"extensions":[".mp4"]}'
+python manage.py manage_tool_registry --submit media_library_report --inputs '{"limit":50,"older_than_days":14,"asset_types":["generated_video"]}'
+python manage.py manage_tool_registry --requests
+python manage.py manage_tool_registry --confirm 3
+python manage.py manage_tool_registry --execute 3
+python manage.py manage_tool_registry --reject 4 --reason "Not approved"
+```
+
 ## Telegram commands
 
 - `/start`
 - `/help`
 - `/status`
 - `/workflows`
+- `/queue`
+- `/history`
+- `/rerun [job_id]`
 - `/last`
 - `/cancel`
+
+Plain text inputs:
+
+- `make video`
+- `status`
+- `queue`
+- `rerun`
+- Natural-language video requests when LiteLLM is enabled
 
 ## ComfyUI workflow setup
 

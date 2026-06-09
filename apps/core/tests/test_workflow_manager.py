@@ -56,3 +56,30 @@ class WorkflowManagerTests(SimpleTestCase):
             self.assertEqual(rendered["1"]["inputs"]["image"], "input.png")
             self.assertEqual(rendered["1"]["inputs"]["config"]["prompt"], "make video")
             self.assertEqual(rendered["1"]["inputs"]["config"]["seed"], 42)
+
+    def test_unresolved_placeholders_raise_value_error(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            workflow_path = Path(temp_dir, "sample.json")
+            workflow_path.write_text(
+                json.dumps(
+                    {
+                        "1": {
+                            "inputs": {
+                                "image": "{INPUT_IMAGE}",
+                                "prompt": "{PROMPT}",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manager = WorkflowManager(workflow_dir=temp_dir)
+
+            with self.assertRaises(ValueError):
+                manager.render_workflow(
+                    "sample",
+                    {
+                        "{INPUT_IMAGE}": "input.png",
+                        "{PROMPT}": "{PROMPT}",
+                    },
+                )

@@ -20,8 +20,18 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-SECRET_KEY = os.getenv("SECRET_KEY", "unsafe-development-key")
-DEBUG = env_bool("DEBUG", True)
+def parse_allowed_user_ids(raw: str) -> list[int]:
+    allowed_user_ids: list[int] = []
+    for item in raw.split(","):
+        stripped = item.strip()
+        if not stripped:
+            continue
+        allowed_user_ids.append(int(stripped))
+    return allowed_user_ids
+
+
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY") or os.getenv("SECRET_KEY", "unsafe-development-key")
+DEBUG = env_bool("DJANGO_DEBUG", env_bool("DEBUG", True))
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "127.0.0.1,localhost")
 
 INSTALLED_APPS = [
@@ -31,7 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "apps.core",
+    "apps.core.apps.CoreConfig",
 ]
 
 MIDDLEWARE = [
@@ -79,17 +89,14 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path(os.getenv("ODDESY_MEDIA_ROOT", "") or (BASE_DIR / "media"))
+
+WORKFLOWS_DIR = BASE_DIR / "workflows"
+DEFAULT_WORKFLOW_NAME = "i2v_wan_480p"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_ALLOWED_USER_IDS = [int(item) for item in env_list("TELEGRAM_ALLOWED_USER_IDS")]
+TELEGRAM_ALLOWED_USER_IDS = parse_allowed_user_ids(os.getenv("TELEGRAM_ALLOWED_USER_IDS", ""))
 
 COMFYUI_BASE_URL = os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
-COMFYUI_WORKFLOW_PATH = os.getenv(
-    "COMFYUI_WORKFLOW_PATH",
-    str(BASE_DIR / "workflows" / "i2v_wan_480p.json"),
-)
-DEFAULT_PROMPT = os.getenv("DEFAULT_PROMPT", "make video")
-POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))

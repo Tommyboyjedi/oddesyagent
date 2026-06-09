@@ -3,39 +3,35 @@ from django.utils import timezone
 
 
 class TelegramUser(models.Model):
-    telegram_id = models.BigIntegerField(unique=True)
+    telegram_user_id = models.BigIntegerField(unique=True)
     username = models.CharField(max_length=255, blank=True)
     first_name = models.CharField(max_length=255, blank=True)
     last_name = models.CharField(max_length=255, blank=True)
     is_allowed = models.BooleanField(default=False)
-    last_seen_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
-        label = self.username or self.first_name or str(self.telegram_id)
-        return f"{label} ({self.telegram_id})"
+        label = self.username or self.first_name or str(self.telegram_user_id)
+        return f"{label} ({self.telegram_user_id})"
 
 
 class MediaAsset(models.Model):
-    KIND_IMAGE = "image"
-    KIND_VIDEO = "video"
-    KIND_OTHER = "other"
-    KIND_CHOICES = [
-        (KIND_IMAGE, "Image"),
-        (KIND_VIDEO, "Video"),
-        (KIND_OTHER, "Other"),
+    TYPE_INCOMING_IMAGE = "incoming_image"
+    TYPE_GENERATED_IMAGE = "generated_image"
+    TYPE_GENERATED_VIDEO = "generated_video"
+    TYPE_OTHER = "other"
+    ASSET_TYPE_CHOICES = [
+        (TYPE_INCOMING_IMAGE, "Incoming image"),
+        (TYPE_GENERATED_IMAGE, "Generated image"),
+        (TYPE_GENERATED_VIDEO, "Generated video"),
+        (TYPE_OTHER, "Other"),
     ]
 
-    SOURCE_TELEGRAM = "telegram"
-    SOURCE_COMFYUI = "comfyui"
-    SOURCE_LOCAL = "local"
-    SOURCE_CHOICES = [
-        (SOURCE_TELEGRAM, "Telegram"),
-        (SOURCE_COMFYUI, "ComfyUI"),
-        (SOURCE_LOCAL, "Local"),
-    ]
-
+    file = models.FileField(upload_to="assets/%Y/%m/%d/")
+    asset_type = models.CharField(max_length=32, choices=ASSET_TYPE_CHOICES, default=TYPE_OTHER)
+    original_file_name = models.CharField(max_length=255, blank=True)
+    telegram_file_id = models.CharField(max_length=255, blank=True)
     telegram_user = models.ForeignKey(
         TelegramUser,
         on_delete=models.SET_NULL,
@@ -43,16 +39,11 @@ class MediaAsset(models.Model):
         blank=True,
         related_name="media_assets",
     )
-    file = models.FileField(upload_to="assets/%Y/%m/%d/")
-    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_OTHER)
-    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_LOCAL)
-    original_name = models.CharField(max_length=255, blank=True)
-    prompt_text = models.TextField(blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(default=dict, blank=True)
 
     def __str__(self) -> str:
-        return f"{self.kind}:{self.id}:{self.original_name or self.file.name}"
+        return f"{self.asset_type}:{self.id}:{self.original_file_name or self.file.name}"
 
 
 class GenerationJob(models.Model):
@@ -76,35 +67,67 @@ class GenerationJob(models.Model):
         on_delete=models.CASCADE,
         related_name="generation_jobs",
     )
-    input_asset = models.ForeignKey(
+    input_media = models.ForeignKey(
         MediaAsset,
         on_delete=models.PROTECT,
-        related_name="input_jobs",
+        related_name="input_generation_jobs",
     )
-    output_asset = models.ForeignKey(
+    output_media = models.ForeignKey(
         MediaAsset,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="output_jobs",
+        related_name="output_generation_jobs",
     )
     workflow_name = models.CharField(max_length=255, default="i2v_wan_480p")
-    prompt_text = models.TextField(blank=True)
-    state = models.CharField(max_length=32, choices=STATE_CHOICES, default=STATE_QUEUED)
+    prompt = models.TextField(blank=True)
     seed = models.BigIntegerField(default=0)
-    external_prompt_id = models.CharField(max_length=255, blank=True)
-    result_payload = models.JSONField(default=dict, blank=True)
+    comfyui_prompt_id = models.CharField(max_length=255, blank=True)
     error_message = models.TextField(blank=True)
+    state = models.CharField(max_length=32, choices=STATE_CHOICES, default=STATE_QUEUED, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+    metadata = models.JSONField(default=dict, blank=True)
 
     def __str__(self) -> str:
         return f"job:{self.id}:{self.state}"
 
+    def mark_running(self) -> None:
+        self.state = self.STATE_RUNNING
+        self.started_at = timezone.now()
+        self.save(update_fields=["state", "started_at", "updated_at"])
+
+    def mark_completed(self, output_media: MediaAsset | None = None) -> None:
+        self.state = self.STATE_COMPLETED
+        self.output_media = output_media
+        self.completed_at = timezone.now()
+        self.error_message = ""
+        self.save(
+            update_fields=[
+                "state",
+                "output_media",
+                "completed_at",
+                "error_message",
+                "updated_at",
+            ]
+        )
+
+    def mark_failed(self, error_message: str) -> None:
+        self.state = self.STATE_FAILED
+        self.error_message = error_message
+        self.completed_at = timezone.now()
+        self.save(update_fields=["state", "error_message", "completed_at", "updated_at"])
+
+    def mark_cancelled(self) -> None:
+        self.state = self.STATE_CANCELLED
+        self.completed_at = timezone.now()
+        self.save(update_fields=["state", "completed_at", "updated_at"])
+
 
 class AuditLog(models.Model):
+    event_type = models.CharField(max_length=64)
     telegram_user = models.ForeignKey(
         TelegramUser,
         on_delete=models.SET_NULL,
@@ -112,9 +135,15 @@ class AuditLog(models.Model):
         blank=True,
         related_name="audit_logs",
     )
-    event_type = models.CharField(max_length=64)
+    generation_job = models.ForeignKey(
+        GenerationJob,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
     message = models.CharField(max_length=255)
-    payload = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

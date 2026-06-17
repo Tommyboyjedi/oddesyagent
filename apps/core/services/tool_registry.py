@@ -13,6 +13,7 @@ from apps.core.services.media_library_cleanup import MediaLibraryCleanupService
 from apps.core.services.media_library_report import MediaLibraryReportService
 from apps.core.services.media_cleanup_preview import MediaCleanupPreviewService
 from apps.core.services.safe_root_browser import SafeRootBrowserError, SafeRootBrowserService
+from apps.core.services.video_last_frame_enhancement import VideoLastFrameEnhancementService
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,15 @@ class ToolRegistryService:
                 include_missing_files=bool(request.requested_inputs.get("include_missing_files", True)),
                 limit=int(request.requested_inputs.get("limit", 100)),
                 safe_roots=request.tool.safe_roots,
+            )
+        elif executor_name == "video_last_frame_enhancement":
+            enhancer = VideoLastFrameEnhancementService()
+            execution_result = enhancer.enhance_last_frame(
+                video_path=str(request.requested_inputs.get("video_path", "")),
+                output_path=str(request.requested_inputs.get("output_path", "")).strip() or None,
+                upscale_factor=float(request.requested_inputs.get("upscale_factor", 2.0)),
+                sharpen_amount=float(request.requested_inputs.get("sharpen_amount", 0.4)),
+                roots=request.tool.safe_roots,
             )
         else:
             raise ValueError(f"Tool '{request.tool.name}' has no executable handler.")

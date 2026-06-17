@@ -41,6 +41,17 @@ class JobServiceTests(TestCase):
         self.assertEqual(job.requested_executor, GenerationJob.EXECUTOR_LOCAL_GPU)
         self.assertEqual(job.metadata["scheduling"]["priority"], 100)
 
+    def test_create_generation_job_allows_prompt_only_jobs(self) -> None:
+        job = self.job_service.create_generation_job(
+            telegram_user=self.telegram_user,
+            input_media=None,
+            workflow_name="jugg_latent_cyberpony (1)",
+            prompt="cyberpunk street portrait",
+        )
+
+        self.assertIsNone(job.input_media_id)
+        self.assertEqual(job.workflow_name, "jugg_latent_cyberpony (1)")
+
     def test_get_rerunnable_job_defaults_to_latest_completed(self) -> None:
         older = GenerationJob.objects.create(
             telegram_user=self.telegram_user,

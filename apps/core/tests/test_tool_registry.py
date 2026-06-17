@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings
@@ -415,6 +416,45 @@ class ToolRegistryServiceTests(TestCase):
             self.assertEqual(executed.status, ToolExecutionRequest.STATUS_EXECUTED)
             self.assertEqual(executed.metadata["execution_result"]["deleted_asset_ids"], [generated_media.id])
             self.assertEqual(generated_media.metadata["cleanup"]["output_job_ids"], [job.id])
+
+    def test_execute_request_runs_video_last_frame_enhancement_tool(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_path = root / "clip.mp4"
+            video_path.write_bytes(b"video")
+            output_path = root / "clip_last_frame_enhanced.png"
+            self.service.register_tool(
+                name="video_last_frame_enhancement",
+                description="Extract the last frame of a video and enhance it with oversampling.",
+                allowed_inputs=["video_path", "output_path", "upscale_factor", "sharpen_amount"],
+                forbidden_inputs=[],
+                audit_requirements=[],
+                safe_roots=[str(root)],
+                is_enabled=True,
+                metadata={"provider": "nas", "executor": "video_last_frame_enhancement"},
+            )
+
+            request = self.service.submit_request(
+                tool_name="video_last_frame_enhancement",
+                requested_inputs={"video_path": str(video_path), "output_path": str(output_path), "upscale_factor": 2},
+            )
+
+            with patch(
+                "apps.core.services.tool_registry.VideoLastFrameEnhancementService.enhance_last_frame",
+                return_value={
+                    "video_path": str(video_path),
+                    "output_path": str(output_path),
+                    "frame_count": 120,
+                    "upscale_factor": 2.0,
+                    "sharpen_amount": 0.4,
+                    "output_size_bytes": 2048,
+                },
+            ) as mock_enhance:
+                executed = self.service.execute_request(request.id)
+
+            self.assertEqual(executed.status, ToolExecutionRequest.STATUS_EXECUTED)
+            self.assertEqual(executed.metadata["execution_result"]["output_path"], str(output_path))
+            mock_enhance.assert_called_once()
 
 
 class ToolDefinitionModelTests(TestCase):

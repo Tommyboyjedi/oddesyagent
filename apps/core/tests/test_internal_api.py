@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from django.core.files.base import ContentFile
 from django.test import Client, TestCase, override_settings
@@ -9,6 +10,7 @@ from apps.core.models import AuditLog, GenerationJob, MediaAsset, TelegramUser
 @override_settings(
     ODDESY_INTERNAL_API_ENABLED=True,
     ODDESY_INTERNAL_API_TOKEN="secret-token",
+    WORKFLOWS_DIR=Path(__file__).resolve().parents[3] / "workflows",
 )
 class InternalApiTests(TestCase):
     def setUp(self) -> None:

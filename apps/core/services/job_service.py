@@ -11,7 +11,7 @@ class JobService:
     def create_generation_job(
         self,
         telegram_user: TelegramUser,
-        input_media: MediaAsset,
+        input_media: MediaAsset | None,
         workflow_name: str,
         prompt: str,
         seed: int = 0,

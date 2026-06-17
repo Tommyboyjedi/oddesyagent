@@ -15,8 +15,10 @@ class ParsedIntent:
     action: str
     workflow_name: str | None = None
     prompt: str | None = None
+    negative_prompt: str | None = None
     seed: int = 0
     duration: int | None = None
+    length_frames: int | None = None
     motion: str | None = None
     job_id: int | None = None
     needs_confirmation: bool = False
@@ -25,7 +27,7 @@ class ParsedIntent:
 
 
 class InstructionParserService:
-    ALLOWED_ACTIONS = {"create_job", "rerun", "status", "queue", "unknown"}
+    ALLOWED_ACTIONS = {"create_job", "rerun", "status", "queue", "lastframeupscale", "unknown"}
     URL_PATTERN = re.compile(r"https?://|www\.", re.IGNORECASE)
     FILE_PATH_PATTERN = re.compile(r"([A-Za-z]:\\|(?:^|\s)\.\.?[\\/]|(?:^|\s)/\S+)")
     SHELL_PATTERN = re.compile(
@@ -41,17 +43,19 @@ class InstructionParserService:
         litellm_model: str | None = None,
         litellm_api_key: str | None = None,
         default_workflow_name: str | None = None,
+        text_to_image_workflow_name: str | None = None,
     ) -> None:
         self.workflow_manager = workflow_manager or WorkflowManager()
         self.litellm_enabled = settings.LITELLM_ENABLED if litellm_enabled is None else litellm_enabled
         self.litellm_model = settings.LITELLM_MODEL if litellm_model is None else (litellm_model or "")
         self.litellm_api_key = settings.LITELLM_API_KEY if litellm_api_key is None else (litellm_api_key or "")
         self.default_workflow_name = default_workflow_name or settings.DEFAULT_WORKFLOW_NAME
+        self.text_to_image_workflow_name = text_to_image_workflow_name or settings.TEXT_TO_IMAGE_WORKFLOW_NAME
 
     def parse_text(self, text: str) -> ParsedIntent:
         normalized_text = " ".join(text.strip().split())
         if not normalized_text:
-            return self._unknown("Send an image, then describe the video you want.")
+            return self._unknown("Send an image and say 'make video', or send a text prompt to generate an image.")
 
         fallback_intent = self._parse_fallback_command(normalized_text)
         if fallback_intent is not None:
@@ -61,8 +65,11 @@ class InstructionParserService:
             return self._unknown("Unsafe instructions are not supported.")
 
         if not self.litellm_enabled:
-            return self._unknown(
-                "Unknown input. Send an image, then send 'make video', 'status', 'queue', or 'rerun'."
+            return self._build_create_job_intent(
+                workflow_name=self.text_to_image_workflow_name,
+                prompt=normalized_text,
+                source="fallback",
+                raw_text=text,
             )
 
         return self._parse_with_litellm(normalized_text)
@@ -80,6 +87,22 @@ class InstructionParserService:
             return ParsedIntent(action="status", message="status", metadata={"parser": "fallback"})
         if lowered == "queue":
             return ParsedIntent(action="queue", message="queue", metadata={"parser": "fallback"})
+        if lowered.startswith("lastframeupscale"):
+            parts = lowered.split()
+            job_id = None
+            if len(parts) > 2:
+                return self._unknown("lastframeupscale accepts an optional numeric video ID only.")
+            if len(parts) == 2:
+                try:
+                    job_id = int(parts[1])
+                except ValueError:
+                    return self._unknown("lastframeupscale accepts an optional numeric video ID only.")
+            return ParsedIntent(
+                action="lastframeupscale",
+                job_id=job_id,
+                message="lastframeupscale",
+                metadata={"parser": "fallback"},
+            )
         if lowered.startswith("rerun"):
             parts = lowered.split()
             job_id = None
@@ -113,7 +136,7 @@ class InstructionParserService:
                 "role": "system",
                 "content": (
                     "You are a strict intent parser for a local Django Telegram bot. "
-                    "Return JSON only with keys action, workflow, prompt, seed, duration, motion, "
+                    "Return JSON only with keys action, workflow, prompt, negative_prompt, seed, duration, length_frames, motion, "
                     "job_id, needs_confirmation, and message. "
                     "Allowed actions: create_job, rerun, status, queue, unknown. "
                     "Allowed workflows only: " + ", ".join(allowed_workflows) + ". "
@@ -154,6 +177,20 @@ class InstructionParserService:
         if action in {"status", "queue"}:
             return ParsedIntent(action=action, message=message or action, metadata={"parser": "litellm"})
 
+        if action == "lastframeupscale":
+            job_id = payload.get("job_id")
+            if job_id is not None:
+                try:
+                    job_id = int(job_id)
+                except (TypeError, ValueError):
+                    return self._unknown("Could not parse that last-frame upscale request safely.")
+            return ParsedIntent(
+                action="lastframeupscale",
+                job_id=job_id,
+                message=message or "lastframeupscale",
+                metadata={"parser": "litellm"},
+            )
+
         if action == "rerun":
             job_id = payload.get("job_id")
             if job_id is not None:
@@ -183,12 +220,16 @@ class InstructionParserService:
 
             seed = self._coerce_int(payload.get("seed"), default=0)
             duration = self._coerce_optional_int(payload.get("duration"))
+            length_frames = self._coerce_optional_int(payload.get("length_frames"))
+            negative_prompt = self._coerce_optional_str(payload.get("negative_prompt"))
             motion = self._coerce_optional_str(payload.get("motion"))
             return self._build_create_job_intent(
                 workflow_name=workflow_name,
                 prompt=prompt,
+                negative_prompt=negative_prompt,
                 seed=seed,
                 duration=duration,
+                length_frames=length_frames,
                 motion=motion,
                 source="litellm",
                 raw_text=raw_text,
@@ -200,8 +241,10 @@ class InstructionParserService:
         self,
         workflow_name: str,
         prompt: str,
+        negative_prompt: str | None = None,
         seed: int = 0,
         duration: int | None = None,
+        length_frames: int | None = None,
         motion: str | None = None,
         source: str = "fallback",
         raw_text: str = "",
@@ -211,8 +254,10 @@ class InstructionParserService:
             "parsed_instruction": {
                 "workflow": workflow_name,
                 "prompt": prompt,
+                "negative_prompt": negative_prompt,
                 "seed": seed,
                 "duration": duration,
+                "length_frames": length_frames,
                 "motion": motion,
                 "raw_text": raw_text,
             },
@@ -221,8 +266,10 @@ class InstructionParserService:
             action="create_job",
             workflow_name=workflow_name,
             prompt=prompt,
+            negative_prompt=negative_prompt,
             seed=seed,
             duration=duration,
+            length_frames=length_frames,
             motion=motion,
             message="create_job",
             metadata=metadata,

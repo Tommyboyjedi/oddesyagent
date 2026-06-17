@@ -3,10 +3,36 @@ from django.utils import timezone
 
 
 class TelegramUser(models.Model):
+    IMAGE_OUTPUT_MODE_SAVED = "saved"
+    IMAGE_OUTPUT_MODE_ALL = "all"
+    DEFAULT_GENERATION_BATCH_COUNT = 1
+    MAX_GENERATION_BATCH_COUNT = 8
+    IMAGE_OUTPUT_MODE_CHOICES = [
+        (IMAGE_OUTPUT_MODE_SAVED, "Saved output only"),
+        (IMAGE_OUTPUT_MODE_ALL, "All node images"),
+    ]
+
     telegram_user_id = models.BigIntegerField(unique=True)
     username = models.CharField(max_length=255, blank=True)
     first_name = models.CharField(max_length=255, blank=True)
     last_name = models.CharField(max_length=255, blank=True)
+    active_text_workflow = models.CharField(max_length=255, blank=True)
+    active_video_workflow = models.CharField(max_length=255, blank=True)
+    active_video_negative_prompt = models.TextField(blank=True)
+    active_video_length_frames = models.PositiveIntegerField(null=True, blank=True)
+    musicvideo_working_project = models.CharField(max_length=64, blank=True)
+    pending_video_media_asset_id = models.PositiveIntegerField(null=True, blank=True)
+    workflow_lora_overrides = models.JSONField(default=dict, blank=True)
+    workflow_text_overrides = models.JSONField(default=dict, blank=True)
+    workflow_image_overrides = models.JSONField(default=dict, blank=True)
+    imageswap_defaults = models.JSONField(default=dict, blank=True)
+    imageswap_draft = models.JSONField(default=dict, blank=True)
+    image_output_mode = models.CharField(
+        max_length=16,
+        choices=IMAGE_OUTPUT_MODE_CHOICES,
+        default=IMAGE_OUTPUT_MODE_SAVED,
+    )
+    generation_batch_count = models.PositiveSmallIntegerField(default=DEFAULT_GENERATION_BATCH_COUNT)
     is_allowed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -18,11 +44,13 @@ class TelegramUser(models.Model):
 
 class MediaAsset(models.Model):
     TYPE_INCOMING_IMAGE = "incoming_image"
+    TYPE_INCOMING_VIDEO = "incoming_video"
     TYPE_GENERATED_IMAGE = "generated_image"
     TYPE_GENERATED_VIDEO = "generated_video"
     TYPE_OTHER = "other"
     ASSET_TYPE_CHOICES = [
         (TYPE_INCOMING_IMAGE, "Incoming image"),
+        (TYPE_INCOMING_VIDEO, "Incoming video"),
         (TYPE_GENERATED_IMAGE, "Generated image"),
         (TYPE_GENERATED_VIDEO, "Generated video"),
         (TYPE_OTHER, "Other"),
@@ -78,6 +106,8 @@ class GenerationJob(models.Model):
     input_media = models.ForeignKey(
         MediaAsset,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="input_generation_jobs",
     )
     output_media = models.ForeignKey(

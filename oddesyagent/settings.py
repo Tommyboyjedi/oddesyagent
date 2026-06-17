@@ -30,6 +30,26 @@ def parse_allowed_user_ids(raw: str) -> list[int]:
     return allowed_user_ids
 
 
+def resolve_workflows_dir(
+    base_dir: Path,
+    env_value: str | None = None,
+    candidate_paths: list[str | Path] | None = None,
+) -> Path:
+    if env_value:
+        return Path(env_value).resolve()
+
+    candidates = candidate_paths or [
+        Path(r"C:\ComfyUI\user\default\workflows"),
+        Path(r"C:\ComfyUI\workflows"),
+        base_dir / "workflows",
+    ]
+    resolved_candidates = [Path(candidate).resolve() for candidate in candidates]
+    for candidate in resolved_candidates:
+        if candidate.is_dir():
+            return candidate
+    return resolved_candidates[-1]
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY") or os.getenv("SECRET_KEY", "unsafe-development-key")
 DEBUG = env_bool("DJANGO_DEBUG", env_bool("DEBUG", True))
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "127.0.0.1,localhost")
@@ -91,8 +111,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(os.getenv("ODDESY_MEDIA_ROOT", "") or (BASE_DIR / "media"))
 
-WORKFLOWS_DIR = BASE_DIR / "workflows"
+WORKFLOWS_DIR = resolve_workflows_dir(BASE_DIR, os.getenv("ODDESY_WORKFLOWS_DIR"))
 DEFAULT_WORKFLOW_NAME = "i2v_wan_480p"
+TEXT_TO_IMAGE_WORKFLOW_NAME = os.getenv("ODDESY_TEXT_TO_IMAGE_WORKFLOW_NAME", "jugg_latent_cyberpony")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -100,6 +121,11 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ALLOWED_USER_IDS = parse_allowed_user_ids(os.getenv("TELEGRAM_ALLOWED_USER_IDS", ""))
 
 COMFYUI_BASE_URL = os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+MVD_REPO_DIR = os.getenv("MVD_REPO_DIR", r"C:\source\python\musicvideo-director")
+MVD_PYTHON_EXECUTABLE = os.getenv(
+    "MVD_PYTHON_EXECUTABLE",
+    r"C:\Users\tompe\.virtualenvs\musicvideo-director\Scripts\python.exe",
+)
 
 ODDESY_INTERNAL_API_ENABLED = env_bool("ODDESY_INTERNAL_API_ENABLED", False)
 ODDESY_INTERNAL_API_TOKEN = os.getenv("ODDESY_INTERNAL_API_TOKEN", "")

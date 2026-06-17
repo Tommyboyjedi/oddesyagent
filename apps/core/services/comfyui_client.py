@@ -45,6 +45,14 @@ class ComfyUIClient:
             )
             response.raise_for_status()
             data = response.json()
+        except requests.HTTPError as exc:
+            response_text = ""
+            if exc.response is not None:
+                response_text = exc.response.text[:4000]
+            detail = f"{exc}"
+            if response_text:
+                detail = f"{detail} | response={response_text}"
+            raise ComfyUIClientError(f"Failed to submit workflow: {detail}") from exc
         except (requests.RequestException, ValueError) as exc:
             raise ComfyUIClientError(f"Failed to submit workflow: {exc}") from exc
 
@@ -67,6 +75,9 @@ class ComfyUIClient:
     def get_outputs_from_history(self, prompt_id: str) -> list[dict[str, Any]]:
         history = self.get_history(prompt_id)
         prompt_history = history.get(prompt_id, {})
+        return self.extract_outputs_from_prompt_history(prompt_history)
+
+    def extract_outputs_from_prompt_history(self, prompt_history: dict[str, Any]) -> list[dict[str, Any]]:
         outputs: list[dict[str, Any]] = []
         for node_id, node_payload in prompt_history.get("outputs", {}).items():
             for output_key, items in node_payload.items():
@@ -82,6 +93,21 @@ class ComfyUIClient:
                             }
                         )
         return outputs
+
+    def extract_execution_error_from_prompt_history(self, prompt_history: dict[str, Any]) -> str | None:
+        status = prompt_history.get("status", {})
+        messages = status.get("messages", [])
+        for message in messages:
+            if not isinstance(message, list) or len(message) < 2:
+                continue
+            message_type, payload = message[0], message[1]
+            if message_type != "execution_error" or not isinstance(payload, dict):
+                continue
+            node_type = payload.get("node_type") or "unknown"
+            node_id = payload.get("node_id") or "unknown"
+            exception_message = str(payload.get("exception_message") or "Unknown ComfyUI execution error").strip()
+            return f"{exception_message} (node {node_id}:{node_type})"
+        return None
 
     def download_output_file(
         self,
@@ -116,7 +142,14 @@ class ComfyUIClient:
         while True:
             history = self.get_history(prompt_id)
             if prompt_id in history:
-                return history[prompt_id]
+                prompt_history = history[prompt_id]
+                status = prompt_history.get("status", {})
+                if status.get("completed") is True:
+                    return prompt_history
+                if str(status.get("status_str", "")).lower() == "error":
+                    return prompt_history
+                if prompt_history.get("outputs") and not status:
+                    return prompt_history
             if time.time() - started_at > timeout_seconds:
                 raise ComfyUIClientError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
             time.sleep(poll_seconds)

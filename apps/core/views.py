@@ -16,13 +16,15 @@ class InternalApiValidationError(ValueError):
 
 
 class InternalApiBaseView(View):
-    oddesy_agent_service = OddesyAgentService()
-
     def dispatch(self, request: HttpRequest, *args, **kwargs):
         auth_error = self._authorize(request)
         if auth_error is not None:
             return auth_error
         return super().dispatch(request, *args, **kwargs)
+
+    @property
+    def oddesy_agent_service(self) -> OddesyAgentService:
+        return OddesyAgentService()
 
     def _authorize(self, request: HttpRequest):
         if not settings.ODDESY_INTERNAL_API_ENABLED:

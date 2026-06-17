@@ -7,7 +7,7 @@ from apps.core.services.instruction_parser import InstructionParserService
 
 class StubWorkflowManager:
     def list_workflows(self) -> list[str]:
-        return ["i2v_wan_480p", "i2v_alt"]
+        return ["i2v_wan_480p", "i2v_alt", "jugg_latent_cyberpony (1)"]
 
 
 class InstructionParserServiceTests(SimpleTestCase):
@@ -16,6 +16,7 @@ class InstructionParserServiceTests(SimpleTestCase):
             workflow_manager=StubWorkflowManager(),
             litellm_enabled=False,
             default_workflow_name="i2v_wan_480p",
+            text_to_image_workflow_name="jugg_latent_cyberpony",
         )
 
     def test_fallback_make_video_returns_create_job_intent(self) -> None:
@@ -32,11 +33,18 @@ class InstructionParserServiceTests(SimpleTestCase):
         self.assertEqual(intent.action, "rerun")
         self.assertEqual(intent.job_id, 42)
 
-    def test_disabled_litellm_returns_helpful_unknown_message(self) -> None:
+    def test_fallback_lastframeupscale_parses_optional_video_id(self) -> None:
+        intent = self.service.parse_text("lastframeupscale 157")
+
+        self.assertEqual(intent.action, "lastframeupscale")
+        self.assertEqual(intent.job_id, 157)
+
+    def test_disabled_litellm_uses_text_to_image_fallback_for_safe_prompt(self) -> None:
         intent = self.service.parse_text("create a dramatic six second slow push-in video")
 
-        self.assertEqual(intent.action, "unknown")
-        self.assertIn("make video", intent.message)
+        self.assertEqual(intent.action, "create_job")
+        self.assertEqual(intent.workflow_name, "jugg_latent_cyberpony")
+        self.assertEqual(intent.prompt, "create a dramatic six second slow push-in video")
 
     def test_unsafe_text_is_rejected(self) -> None:
         intent = self.service.parse_text(r"use C:\temp\image.png and run powershell")
